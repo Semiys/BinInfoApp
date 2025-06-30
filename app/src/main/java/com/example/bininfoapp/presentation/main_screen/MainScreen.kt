@@ -1,5 +1,9 @@
 package com.example.bininfoapp.presentation.main_screen
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -10,12 +14,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.bininfoapp.domain.model.BinInfo
 
-// Я добавил аннотацию для использования экспериментальных API Material 3
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -23,8 +27,9 @@ fun MainScreen(
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val state = viewModel.state.value
-    // SnackbarHostState нужно "запомнить"
     val snackbarHostState = remember { SnackbarHostState() }
+    // Получаем контекст для создания Intent'ов
+    val context = LocalContext.current
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -69,10 +74,20 @@ fun MainScreen(
             }
 
             state.binInfo?.let { info ->
-                BinInfoCard(info = info)
+                BinInfoCard(
+                    info = info,
+                    onCoordinatesClick = { lat, lon ->
+                        openMap(context, lat, lon)
+                    },
+                    onUrlClick = { url ->
+                        openUrl(context, url)
+                    },
+                    onPhoneClick = { phone ->
+                        openPhone(context, phone)
+                    }
+                )
             }
 
-            // LaunchedEffect нужен для вызова suspend-функций в Composable
             LaunchedEffect(key1 = state.error) {
                 if (state.error != null) {
                     snackbarHostState.showSnackbar(
@@ -85,27 +100,36 @@ fun MainScreen(
 }
 
 @Composable
-fun BinInfoCard(info: BinInfo) {
-    Card(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
+fun BinInfoCard(
+    info: BinInfo,
+    onCoordinatesClick: (Int, Int) -> Unit,
+    onUrlClick: (String) -> Unit,
+    onPhoneClick: (String) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
             InfoRow("Country:", info.countryName ?: "N/A")
-            InfoRow("Coordinates:", formatCoordinates(info.countryCoordinates))
+            InfoRow(
+                label = "Coordinates:",
+                value = formatCoordinates(info.countryCoordinates),
+                onClick = {
+                    info.countryCoordinates?.first?.let { lat ->
+                        info.countryCoordinates.second?.let { lon ->
+                            onCoordinatesClick(lat, lon)
+                        }
+                    }
+                }
+            )
             InfoRow("Card Type:", info.cardType ?: "N/A")
             InfoRow("Bank:", info.bankName ?: "N/A")
-            InfoRow("Bank URL:", info.bankUrl)
-            // Здесь была опечатка Info-row, я её исправил
-            InfoRow("Bank Phone:", info.bankPhone)
+            InfoRow("Bank URL:", info.bankUrl, onClick = { info.bankUrl?.let(onUrlClick) })
+            InfoRow("Bank Phone:", info.bankPhone, onClick = { info.bankPhone?.let(onPhoneClick) })
         }
     }
 }
 
 @Composable
-fun InfoRow(label: String, value: String?) {
-    // Убрал isClickable, т.к. мы пока не реализуем эту логику
+fun InfoRow(label: String, value: String?, onClick: (() -> Unit)? = null) {
     if (value != null) {
         Row(
             modifier = Modifier
@@ -113,11 +137,52 @@ fun InfoRow(label: String, value: String?) {
                 .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-            // TODO: Add click handling for URL and Phone
-            Text(text = value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f)
+            )
+
+            // Оборачиваем текст в Box и делаем Box кликабельным
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .then(
+                        if (onClick != null) Modifier.clickable { onClick() } else Modifier
+                    )
+            ) {
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
         }
     }
+}
+
+private fun openMap(context: Context, lat: Int, lon: Int) {
+    val gmmIntentUri = Uri.parse("geo:$lat,$lon")
+    val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri)
+    mapIntent.setPackage("com.google.android.apps.maps") // Указываем, чтобы открылось именно в Google Картах
+    if (mapIntent.resolveActivity(context.packageManager) != null) {
+        context.startActivity(mapIntent)
+    }
+}
+
+private fun openUrl(context: Context, url: String) {
+    // Добавляем https://, если его нет
+    val fullUrl = if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        "https://$url"
+    } else {
+        url
+    }
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fullUrl))
+    context.startActivity(intent)
+}
+
+private fun openPhone(context: Context, phone: String) {
+    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone"))
+    context.startActivity(intent)
 }
 
 fun formatCoordinates(coords: Pair<Int?, Int?>?): String {
